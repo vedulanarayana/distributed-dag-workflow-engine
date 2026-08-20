@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Workflow Dashboard</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; background: #0f1115; color: #e6e6e6; }
+  h1 { font-size: 1.25rem; margin-bottom: 1rem; }
+  .level { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .node {
+    border: 1px solid #333; border-radius: 6px; padding: 0.75rem 1rem;
+    min-width: 160px; background: #1a1d24;
+  }
+  .node .name { font-weight: 600; margin-bottom: 0.25rem; }
+  .node .meta { font-size: 0.8rem; color: #999; }
+  .state { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px; font-size: 0.75rem; text-transform: uppercase; }
+  .state-pending { background: #444; }
+  .state-running { background: #1d4ed8; }
+  .state-succeeded { background: #15803d; }
+  .state-failed { background: #b91c1c; }
+  .state-retrying { background: #b45309; }
+  #meta { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+  <h1>Workflow Dashboard</h1>
+  <div id="meta">loading…</div>
+  <div id="levels"></div>
+
+<script>
+const workflowId = window.location.pathname.split("/").pop();
+
+async function poll() {
+  try {
+    const res = await fetch(`/api/v1/dashboard/data/${workflowId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function render(data) {
+  document.getElementById("meta").textContent =
+    `workflow ${data.workflow_id} — ${data.nodes.length} tasks, ${data.levels.length} levels`;
+
+  const byLevel = data.levels.map(levelIds =>
+    levelIds.map(id => data.nodes.find(n => n.id === id)).filter(Boolean)
+  );
+
+  const container = document.getElementById("levels");
+  container.innerHTML = "";
+  byLevel.forEach((levelNodes, i) => {
+    const row = document.createElement("div");
+    row.className = "level";
+    levelNodes.forEach(node => {
+      const el = document.createElement("div");
+      el.className = "node";
+      el.innerHTML = `
+        <div class="name">${node.name}</div>
+        <span class="state state-${node.state}">${node.state}</span>
+        <div class="meta">retries: ${node.retry_count}</div>
+      `;
+      row.appendChild(el);
+    });
+    container.appendChild(row);
+  });
+}
+
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
