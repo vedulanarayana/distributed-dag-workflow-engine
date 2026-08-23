@@ -37,8 +37,30 @@ class StateManager:
                 failed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflows (
+                workflow_id TEXT PRIMARY KEY,
+                definition TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
         conn.close()
+
+    def save_workflow(self, workflow_id, definition: Dict):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "INSERT OR REPLACE INTO workflows (workflow_id, definition) VALUES (?, ?)",
+            (workflow_id, json.dumps(definition)),
+        )
+        conn.commit()
+        conn.close()
+
+    def load_all_workflows(self) -> Dict[str, Dict]:
+        conn = sqlite3.connect(self.db_path)
+        rows = conn.execute("SELECT workflow_id, definition FROM workflows").fetchall()
+        conn.close()
+        return {workflow_id: json.loads(definition) for workflow_id, definition in rows}
 
     def transition_state(self, task_id, workflow_id, old_state, new_state,
                           idempotency_key=None, payload=None, increment_retry=False):

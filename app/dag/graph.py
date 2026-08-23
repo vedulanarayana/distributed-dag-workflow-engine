@@ -34,6 +34,19 @@ class DAG:
     def get_dependents(self, task_id: str) -> List[str]:
         return [nid for nid, n in self.nodes.items() if task_id in n.dependencies]
 
+    def to_dict(self) -> dict:
+        return {"workflow_id": self.workflow_id, "nodes": [n.to_dict() for n in self.nodes.values()]}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DAG":
+        # func isn't serializable, so restored nodes have none set — callers
+        # must supply a default_executor when running a DAG loaded this way
+        dag = cls(workflow_id=data["workflow_id"])
+        for n in data["nodes"]:
+            node = DAGNode(n["task_id"], n["name"], dependencies=n["dependencies"])
+            dag.nodes[node.task_id] = node
+        return dag
+
     def validate(self):
         for task_id, node in self.nodes.items():
             for dep in node.dependencies:

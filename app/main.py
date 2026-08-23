@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from typing import Dict, List
@@ -12,14 +13,22 @@ from app.retry.retry_manager import RetryManager
 from app.worker.dispatcher import WorkerDispatcher
 from app.config import STATE_DB, WAL_FILE
 
-app = FastAPI(title="Workflow Orchestration Engine")
-
 wal = WriteAheadLog(str(WAL_FILE))
 state_manager = StateManager(STATE_DB, wal)
 retry_manager = RetryManager(state_manager)
 dispatcher = WorkerDispatcher(state_manager, retry_manager)
 
 workflows: Dict[str, DAG] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    for workflow_id, definition in state_manager.load_all_workflows().items():
+        workflows[workflow_id] = DAG.from_dict(definition)
+    yield
+
+
+app = FastAPI(title="Workflow Orchestration Engine", lifespan=lifespan)
 
 
 def default_task_executor(node):
@@ -46,6 +55,7 @@ async def create_workflow(tasks: List[Dict]):
         raise HTTPException(status_code=400, detail=str(e))
 
     workflows[dag.workflow_id] = dag
+    state_manager.save_workflow(dag.workflow_id, dag.to_dict())
     return {"workflow_id": dag.workflow_id, "total_tasks": len(dag.nodes),
             "execution_order": KahnTopologicalSort.sort(dag)}
 
