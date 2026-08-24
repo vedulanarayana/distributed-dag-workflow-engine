@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 from typing import Dict, List
 import random
 import time
@@ -11,7 +12,7 @@ from app.state.state_manager import StateManager
 from app.state.wal import WriteAheadLog
 from app.retry.retry_manager import RetryManager
 from app.worker.dispatcher import WorkerDispatcher
-from app.config import STATE_DB, WAL_FILE
+from app.config import BASE_DIR, STATE_DB, WAL_FILE
 
 wal = WriteAheadLog(str(WAL_FILE))
 state_manager = StateManager(STATE_DB, wal)
@@ -20,9 +21,18 @@ dispatcher = WorkerDispatcher(state_manager, retry_manager)
 
 workflows: Dict[str, DAG] = {}
 
+DASHBOARD_HTML_PATH = BASE_DIR / "app" / "dashboard" / "static" / "index.html"
+
+
+class TaskDefinition(BaseModel):
+    name: str
+    dependencies: List[str] = []
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # replay any WAL entries left over from a crash between an append and its apply
+    state_manager.recover_from_wal()
     for workflow_id, definition in state_manager.load_all_workflows().items():
         workflows[workflow_id] = DAG.from_dict(definition)
     yield
@@ -39,15 +49,19 @@ def default_task_executor(node):
 
 
 @app.post("/api/v1/workflows")
-async def create_workflow(tasks: List[Dict]):
+async def create_workflow(tasks: List[TaskDefinition]):
     dag = DAG()
     id_map = {}
     for t in tasks:
-        node = dag.add_node(t["name"])
-        id_map[t["name"]] = node.task_id
+        if t.name in id_map:
+            raise HTTPException(status_code=400, detail=f"duplicate task name: {t.name}")
+        node = dag.add_node(t.name)
+        id_map[t.name] = node.task_id
     for t in tasks:
-        for dep_name in t.get("dependencies", []):
-            dag.nodes[id_map[t["name"]]].dependencies.append(id_map[dep_name])
+        for dep_name in t.dependencies:
+            if dep_name not in id_map:
+                raise HTTPException(status_code=400, detail=f"task '{t.name}' depends on unknown task '{dep_name}'")
+            dag.nodes[id_map[t.name]].dependencies.append(id_map[dep_name])
 
     try:
         dag.validate()
@@ -100,7 +114,8 @@ async def dashboard_data(workflow_id: str):
 
 @app.get("/dashboard/{workflow_id}", response_class=HTMLResponse)
 async def dashboard(workflow_id: str):
-    return HTMLResponse(open("app/dashboard/static/index.html").read())
+    with open(DASHBOARD_HTML_PATH) as f:
+        return HTMLResponse(f.read())
 
 
 @app.get("/api/v1/health")

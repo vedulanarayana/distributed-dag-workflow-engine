@@ -1,7 +1,7 @@
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict
 
 
@@ -18,7 +18,7 @@ class WriteAheadLog:
             open(self.wal_file, "w").close()
 
     def append(self, record: Dict) -> bool:
-        record["timestamp"] = datetime.utcnow().isoformat()
+        record["timestamp"] = datetime.now(timezone.utc).isoformat()
         record.setdefault("transaction_id", str(uuid.uuid4()))
         try:
             with open(self.wal_file, "a") as f:
